@@ -1,3 +1,12 @@
+---
+title: Vizan Ocr Studio
+emoji: 🦀
+colorFrom: blue
+colorTo: red
+sdk: docker
+pinned: false
+---
+
 <div align="center">
   <p>
       <img width="100%" src="./docs/images/Banner.png" alt="PaddleOCR Banner">
