@@ -13,6 +13,10 @@ RUN apt-get update && apt-get install -y \
 
 COPY . .
 
+# Install heavy dependencies first to avoid OOM
+# Install heavy dependencies first to avoid OOM
+RUN pip install --no-cache-dir paddlepaddle==2.6.1
+
 RUN pip install --no-cache-dir -r requirements.txt
 
 EXPOSE 7860
