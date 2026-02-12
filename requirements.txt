@@ -3,7 +3,7 @@ scikit-image
 pyclipper
 lmdb
 tqdm
-numpy
+numpy<2.0.0
 rapidfuzz
 opencv-python
 opencv-contrib-python
