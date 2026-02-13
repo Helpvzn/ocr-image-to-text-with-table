@@ -21,6 +21,8 @@ import numpy as np
 import base64
 import json
 from PIL import Image
+import pandas as pd
+import io
 
 st.set_page_config(
     page_title="Vizan Designer Studio v2.0",
@@ -115,6 +117,7 @@ def get_designer_v2(ocr_data, img_b64, w, h):
             <span style="color:#888; margin:0 10px; font-size:13px" id="zoom-label">100%</span>
             <button class="btn-pro" onclick="downloadImage()">🖼️ PNG</button>
             <button class="btn-pro" onclick="downloadPDF()">📄 PDF</button>
+            <button class="btn-pro" onclick="copyText()">📋 COPY</button>
             <button class="btn-pro" style="background:#333; color:#888" onclick="window.parent.location.reload()">EXIT</button>
         </div>
     </div>
@@ -123,19 +126,13 @@ def get_designer_v2(ocr_data, img_b64, w, h):
         <canvas id="c"></canvas>
     </div>
 
+    <!-- Inspector Removed as per user request -->
+    <!--
     <div id="info-panel">
         <h4 style="margin:0 0 12px 0; color:#4facfe; font-size:15px">Designer Inspector</h4>
-        <div style="line-height:1.8">
-            <p>✅ <b>Double-Click</b>: Inline Edit</p>
-            <p>✅ <b>Drag</b>: Reposition</p>
-            <p>✅ <b>Zoom</b>: +/− Buttons</p>
-            <p>✅ <b>Export</b>: PNG or PDF</p>
-            <div style="margin-top:20px; border-top:1px dashed #444; padding-top:15px; opacity:0.6; font-style:italic">
-                Engine: Fabric.js v5.3<br>
-                Mode: Professional Studio
-            </div>
-        </div>
+        ...
     </div>
+    -->
 
     <script>
         const ocrData = {ocr_json};
@@ -230,6 +227,19 @@ def get_designer_v2(ocr_data, img_b64, w, h):
             pdf.addImage(imgData, 'JPEG', 0, 0, {w}, {h});
             pdf.save('Vizan_Studio_Export.pdf');
         }}
+
+        function copyText() {{
+            let allText = [];
+            canvas.getObjects().forEach(obj => {{
+                if (obj.text) allText.push(obj.text);
+            }});
+            const textToCopy = allText.join('\\n');
+            navigator.clipboard.writeText(textToCopy).then(() => {{
+                alert('Text Copied to Clipboard! 📋');
+            }}).catch(err => {{
+                console.error('Failed to copy: ', err);
+            }});
+        }}
     </script>
 </body>
 </html>
@@ -287,90 +297,146 @@ elif st.session_state['v2_state'] == 'studio':
     st.markdown("---")
     st.subheader("📝 Edit Text & Regenerate Document")
 
-    # Prepare data for editor
+    # --- ACTION BUTTONS & PREVIEW ---
+    st.markdown("---")
+    
     raw_res = d['ocr'].get('raw_result', [])
-    if raw_res and isinstance(raw_res, list) and len(raw_res) > 0:
-        region = raw_res[0]
-        lines_data = region.get('res', [])
-        
-        # Create a list of dictionaries for data_editor
-        editor_data = []
-        for i, line in enumerate(lines_data):
-            editor_data.append({
-                "ID": i + 1,
-                "Text": line.get('text', '')
-            })
+    docx_path = d['ocr'].get('docx_path')
+    
+    c1, c2 = st.columns([1, 1])
+    with c1:
+        if docx_path and os.path.exists(docx_path):
+            with open(docx_path, "rb") as f:
+                st.download_button(
+                    label="📥 Download Original Word Doc",
+                    data=f,
+                    file_name=os.path.basename(docx_path),
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                    type="primary"
+                )
+        else:
+            st.info("Word Document not available.")
             
-        # Display Editor
-        edited_data = st.data_editor(
-            editor_data,
-            column_config={
-                "ID": st.column_config.NumberColumn(width="small", disabled=True),
-                "Text": st.column_config.TextColumn(width="large")
-            },
-            use_container_width=True,
-            hide_index=True,
-            height=400,
-            key=f"editor_{d['ocr']['metadata'].get('image_name')}"
-        )
-        
-        col1, col2 = st.columns([1, 1])
-        with col1:
-             if st.button("🔄 Generate Updated Word Doc", type="primary", use_container_width=True):
-                 with st.spinner("Regenerating Document..."):
-                     # Update the raw result with edited text
-                     new_res = []
-                     for i, row in enumerate(edited_data):
-                         original_line = lines_data[i]
-                         # Create copy of line with new text
-                         new_line = original_line.copy()
-                         new_line['text'] = row['Text']
-                         new_res.append(new_line)
-                         
-                     # Construct new result structure
-                     new_raw_result = [{
-                         'type': region.get('type', 'text'),
-                         'bbox': region.get('bbox'),
-                         'res': new_res
-                     }]
-                     
-                     # Re-initialize engine to call regeneration
-                     try:
-                         # Ensure LocalOCREngine is available
-                         engine = LocalOCREngine(use_gpu=False)
-                         
-                         # Convert base64 image back to numpy for processing
-                         nparr = np.frombuffer(base64.b64decode(d['image']), np.uint8)
-                         img_np = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                         
-                         # Regenerate
-                         new_doc_path = engine.regenerate_docx_from_result(
-                             new_raw_result, 
-                             img_np, 
-                             img_name=f"edited_{d['ocr']['metadata'].get('image_name', 'doc')}"
-                         )
-                         
-                         if new_doc_path:
-                             st.success("✅ Document Updated!")
-                             with open(new_doc_path, "rb") as f:
-                                 st.download_button(
-                                     label="📥 Download Edited Word Doc",
-                                     data=f,
-                                     file_name="Edited_Document.docx",
-                                     mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                                     use_container_width=True
-                                 )
-                         else:
-                             st.error("Failed to regenerate document.")
-                     except Exception as e:
-                         st.error(f"Error during regeneration: {e}")
+    with c2:
+        if st.button("⬅️ New Project", use_container_width=True):
+            st.session_state['v2_state'] = 'welcome'
+            if 'v2_data' in st.session_state: del st.session_state['v2_data']
+            st.rerun()
 
-        with col2:
-            if st.button("⬅️ New Project", use_container_width=True):
-                st.session_state['v2_state'] = 'welcome'
-                # Clear session state
-                if 'v2_data' in st.session_state: del st.session_state['v2_data']
-                st.rerun()
+    # --- FORMATTED PREVIEW ---
+    if raw_res and isinstance(raw_res, list) and len(raw_res) > 0:
+        st.markdown("---")
+        st.subheader("📄 Formatted Document Preview")
+        st.caption("Select content below to Copy (Maintains Layout & Tables) 📋")
+        
+        # Determine scale for preview (fit to ~800px width)
+        orig_w = d['w']
+        orig_h = d['h']
+        target_w = 800
+        scale = target_w / orig_w if orig_w > 0 else 1.0
+        target_h = int(orig_h * scale)
+        
+        preview_html = ""
+        
+        # Sort regions for DOM order
+        sorted_regions = sorted(raw_res, key=lambda x: (x['bbox'][1] if x.get('bbox') else 0, x['bbox'][0] if x.get('bbox') else 0))
+        
+        for region in sorted_regions:
+            bbox = region.get('bbox') # [x1, y1, x2, y2]
+            if not bbox: continue
+            
+            x, y = bbox[0] * scale, bbox[1] * scale
+            w, h = (bbox[2] - bbox[0]) * scale, (bbox[3] - bbox[1]) * scale
+            
+            rtype = region.get('type')
+            res = region.get('res')
+            
+            if rtype == 'table':
+                if isinstance(res, dict) and 'html' in res:
+                     # Tables are tricky with absolute pos if they span huge areas.
+                     # Render table in a div at its position.
+                     # Remove html/body tags
+                     t_html = res['html'].replace('<html><body>', '').replace('</body></html>', '')
+                     # Styling
+                     t_html = t_html.replace('<table', '<table style="width:100%; height:100%; border-collapse:collapse; font-size:12px;"')
+                     t_html = t_html.replace('<td', '<td style="border:1px solid #ccc; padding:2px;"')
+                     
+                     preview_html += f'<div style="position:absolute; left:{x}px; top:{y}px; width:{w}px; overflow:hidden;">{t_html}</div>'
+            else:
+                # Text Region: Iterate over individual lines for exact positioning
+                lines = region.get('res', [])
+                if isinstance(lines, list):
+                    for line in lines:
+                        # Ensure line has bbox
+                        l_bbox = line.get('bbox')
+                        txt = line.get('text', '')
+                        
+                        if l_bbox and len(l_bbox) == 4 and txt.strip():
+                            # Scale coordinates
+                            lx, ly = l_bbox[0] * scale, l_bbox[1] * scale
+                            lw, lh = (l_bbox[2] - l_bbox[0]) * scale, (l_bbox[3] - l_bbox[1]) * scale
+                            
+                            # Font estimation logic (approximate)
+                            # Using height as guide
+                            font_size = max(10, int(lh * 0.75))
+                            
+                            # Render line as absolute div
+                            preview_html += f'<div style="position:absolute; left:{lx}px; top:{ly}px; width:{lw}px; height:{lh}px; font-size:{font_size}px; line-height:1; overflow:hidden; white-space:pre; font-family:Arial, sans-serif;">{txt}</div>'
+
+        # Render HTML Container with ID and Toolbar
+        # We need JS libraries for HTML to Image/PDF: html2canvas & jspdf
+        # Since these might not be loaded in the main app context (outside get_designer_v2), we reinject them here just in case.
+        # But script tags in st.markdown work.
+        
+        toolbar_html = f"""
+        <div style="margin-bottom: 10px; display: flex; gap: 10px;">
+            <button onclick="downloadPreviewImage()" style="padding: 5px 10px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px;">🖼️ Download PNG</button>
+            <button onclick="downloadPreviewPDF()" style="padding: 5px 10px; cursor: pointer; background: #dc3545; color: white; border: none; border-radius: 4px;">📄 Download PDF</button>
+        </div>
+        """
+        
+        js_logic = """
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+        <script>
+            function downloadPreviewImage() {
+                const element = document.getElementById('preview-container');
+                html2canvas(element, { scale: 2 }).then(canvas => {
+                    const link = document.createElement('a');
+                    link.download = 'document_preview.png';
+                    link.href = canvas.toDataURL();
+                    link.click();
+                });
+            }
+            
+            async function downloadPreviewPDF() {
+                const element = document.getElementById('preview-container');
+                const canvas = await html2canvas(element, { scale: 2 });
+                const imgData = canvas.toDataURL('image/png');
+                
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF('p', 'mm', 'a4');
+                const imgProps = pdf.getImageProperties(imgData);
+                const pdfWidth = pdf.internal.pageSize.getWidth();
+                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+                
+                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+                pdf.save("document_preview.pdf");
+            }
+        </script>
+        """
+        
+        st.markdown(
+            f'''
+            {js_logic}
+            {toolbar_html}
+            <div id="preview-container" style="position:relative; width:{target_w}px; height:{target_h}px; background:white; color:black; border:1px solid #ddd; box-shadow: 0 4px 8px rgba(0,0,0,0.1); margin: 0 auto; overflow:hidden;">
+                {preview_html}
+            </div>
+            ''',
+            unsafe_allow_html=True
+        )
 
     else:
         st.warning("No editable text found.")
