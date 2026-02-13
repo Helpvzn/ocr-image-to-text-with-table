@@ -276,7 +276,7 @@ if st.session_state['v2_state'] == 'welcome':
     st.title("🎨 Vizan Designer Studio v2.0")
     st.write("Professional Carbon-Copy Document Designer")
     
-    up = st.file_uploader("Upload Document Image", type=['png', 'jpg', 'jpeg'])
+    up = st.file_uploader("Upload Document Image", type=['png', 'jpg', 'jpeg', 'webp'])
     if up:
         f_bytes = np.asarray(bytearray(up.read()), dtype=np.uint8)
         img = cv2.imdecode(f_bytes, 1)
@@ -293,9 +293,8 @@ elif st.session_state['v2_state'] == 'studio':
     studio_html = get_designer_v2(d['ocr'], d['image'], d['w'], d['h'])
     html(studio_html, height=900, scrolling=False)
     
-    # --- EDITOR & EXPORT SECTION ---
-    st.markdown("---")
-    st.subheader("📝 Edit Text & Regenerate Document")
+    
+    # --- ACTION BUTTONS & PREVIEW ---
 
     # --- ACTION BUTTONS & PREVIEW ---
     st.markdown("---")
@@ -389,51 +388,104 @@ elif st.session_state['v2_state'] == 'studio':
         # Since these might not be loaded in the main app context (outside get_designer_v2), we reinject them here just in case.
         # But script tags in st.markdown work.
         
-        toolbar_html = f"""
-        <div style="margin-bottom: 10px; display: flex; gap: 10px;">
-            <button onclick="downloadPreviewImage()" style="padding: 5px 10px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px;">🖼️ Download PNG</button>
-            <button onclick="downloadPreviewPDF()" style="padding: 5px 10px; cursor: pointer; background: #dc3545; color: white; border: none; border-radius: 4px;">📄 Download PDF</button>
-        </div>
-        """
+        toolbar_html = """
+<div style="margin-bottom: 10px; display: flex; gap: 10px;">
+    <button id="btn-png" style="padding: 5px 10px; cursor: pointer; background: #007bff; color: white; border: none; border-radius: 4px;">🖼️ Download PNG</button>
+    <button id="btn-pdf" style="padding: 5px 10px; cursor: pointer; background: #dc3545; color: white; border: none; border-radius: 4px;">📄 Download PDF</button>
+</div>
+<div id="js-status" style="font-size: 10px; color: gray; margin-bottom: 5px;"></div>
+"""
         
         js_logic = """
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
-        <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
-        <script>
-            function downloadPreviewImage() {
-                const element = document.getElementById('preview-container');
-                html2canvas(element, { scale: 2 }).then(canvas => {
-                    const link = document.createElement('a');
-                    link.download = 'document_preview.png';
-                    link.href = canvas.toDataURL();
-                    link.click();
-                });
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script>
+    window.downloadPreviewImage = function() {
+        const status = document.getElementById('js-status');
+        if(status) status.innerText = "Status: Starting Image Download...";
+        
+        const element = document.getElementById('preview-container');
+        if (!element) { alert('Preview container not found.'); return; }
+        
+        const btn = document.getElementById('btn-png');
+        if(btn) btn.innerText = "Processing...";
+        
+        html2canvas(element, { scale: 2 }).then(canvas => {
+            try {
+                const link = document.createElement('a');
+                link.download = 'document_preview.png';
+                link.href = canvas.toDataURL();
+                link.click();
+                if(btn) btn.innerText = "🖼️ Download PNG";
+                if(status) status.innerText = "Status: Image Done!";
+            } catch (e) {
+                alert("Error saving image: " + e.message);
+                if(btn) btn.innerText = "Error (Try Again)";
+                if(status) status.innerText = "Status: Error " + e.message;
             }
+        }).catch(err => {
+            alert("html2canvas Error: " + err);
+            if(btn) btn.innerText = "Error (Try Again)";
+            if(status) status.innerText = "Status: Lib Error " + err;
+        });
+    };
+    
+    window.downloadPreviewPDF = async function() {
+        const status = document.getElementById('js-status');
+        if(status) status.innerText = "Status: Starting PDF Download...";
+
+        const element = document.getElementById('preview-container');
+        if (!element) { alert('Preview container not found.'); return; }
+
+        const btn = document.getElementById('btn-pdf');
+        if(btn) btn.innerText = "Processing...";
+        
+        if (!window.html2canvas || !window.jspdf) { 
+            alert('Libraries not loaded yet. Please wait a few seconds.'); 
+            if(status) status.innerText = "Status: Libraries Loading...";
+            return; 
+        }
+
+        try {
+            const canvas = await html2canvas(element, { scale: 2, useCORS: true });
+            const imgData = canvas.toDataURL('image/png');
             
-            async function downloadPreviewPDF() {
-                const element = document.getElementById('preview-container');
-                const canvas = await html2canvas(element, { scale: 2 });
-                const imgData = canvas.toDataURL('image/png');
-                
-                const { jsPDF } = window.jspdf;
-                const pdf = new jsPDF('p', 'mm', 'a4');
-                const imgProps = pdf.getImageProperties(imgData);
-                const pdfWidth = pdf.internal.pageSize.getWidth();
-                const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-                
-                pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
-                pdf.save("document_preview.pdf");
-            }
-        </script>
-        """
+            const { jsPDF } = window.jspdf;
+            const pdf = new jsPDF('p', 'mm', 'a4');
+            const imgProps = pdf.getImageProperties(imgData);
+            const pdfWidth = pdf.internal.pageSize.getWidth();
+            const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+            
+            pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+            pdf.save("document_preview.pdf");
+            if(btn) btn.innerText = "📄 Download PDF";
+            if(status) status.innerText = "Status: PDF Done!";
+        } catch (e) {
+             alert("Error generating PDF: " + e.message);
+             if(btn) btn.innerText = "Error (Try Again)";
+             if(status) status.innerText = "Status: Error " + e.message;
+        }
+    };
+
+    // Attach listeners explicitly
+    const btnPng = document.getElementById('btn-png');
+    if(btnPng) {
+        btnPng.onclick = window.downloadPreviewImage;
+    }
+    const btnPdf = document.getElementById('btn-pdf');
+    if(btnPdf) {
+        btnPdf.onclick = window.downloadPreviewPDF;
+    }
+</script>
+"""
         
         st.markdown(
             f'''
-            {js_logic}
-            {toolbar_html}
-            <div id="preview-container" style="position:relative; width:{target_w}px; height:{target_h}px; background:white; color:black; border:1px solid #ddd; box-shadow: 0 4px 8px rgba(0,0,0,0.1); margin: 0 auto; overflow:hidden;">
-                {preview_html}
-            </div>
+{toolbar_html}
+<div id="preview-container" style="position:relative; width:{target_w}px; height:{target_h}px; background:white; color:black; border:1px solid #ddd; box-shadow: 0 4px 8px rgba(0,0,0,0.1); margin: 0 auto; overflow:hidden;">
+{preview_html}
+</div>
+{js_logic}
             ''',
             unsafe_allow_html=True
         )
